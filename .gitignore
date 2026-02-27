@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+
+# Data and Models
+data/
+output_csv/
+output_csv.csv
+features.csv
+models/*.pkl
+models/*.png
+
+# Tracebacks and Logs
+*.log
+runner.py

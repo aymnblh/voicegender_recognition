@@ -1,11 +1,3 @@
-"""
-feature_extraction.py
----------------------
-Lit le fichier output_csv.csv, extrait des features audio riches
-avec librosa (MFCC, ZCR, spectral centroid, etc.) en parallèle
-et sauvegarde un nouveau fichier features.csv prêt pour l'entraînement.
-"""
-
 import os
 import numpy as np
 import pandas as pd
@@ -14,12 +6,10 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 
-# ─────────────────────────────────────────────
-# Paramètres
-# ─────────────────────────────────────────────
+
 N_MFCC    = 13
-N_JOBS    = -1          # -1 = tous les cœurs CPU
-MAX_FILES = None        # None = tous ; mettre un int pour tester vite (ex: 200)
+N_JOBS    = -1          
+MAX_FILES = None        
 INPUT_CSV  = "output_csv.csv"
 OUTPUT_CSV = "features.csv"
 
@@ -68,7 +58,7 @@ def extract_features(row) -> dict | None:
     for i in range(12):
         feats[f"chroma{i+1}_mean"] = float(np.mean(chroma[i]))
 
-    # Fréquence fondamentale (F0) via YIN
+    
     try:
         f0 = librosa.yin(y, fmin=50, fmax=500)
         f0_voiced = f0[f0 > 0]

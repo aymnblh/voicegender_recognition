@@ -1,0 +1,25 @@
+# Explication des fonctionnalités Spark (projet Voice Gender Recognition)
+
+*Note importante* : En analysant le code actuel du projet (dans `src/main.py`, `src/feature_extraction.py`, etc.), on remarque que **PySpark n'est finalement pas utilisé dans l'exécution finale**. Comme mentionné dans les commentaires du code (`pas de UDF Spark sur Windows`), des limitations techniques sous Windows ont forcé l'abandon de Spark au profit d'outils Python standards (`pandas`, `joblib.Parallel` pour le multithreading) et de bibliothèques ML classiques (`scikit-learn`).
+
+Cependant, dans le cadre de la conception initiale du projet (orientée Big Data / Microservices sur PySpark), voici **les fonctionnalités Spark qui étaient prévues/utilisées** et leur but :
+
+## 1. SparkSession (Le point d'entrée)
+- **But** : Initialiser l'application Spark. C'est le point d'entrée principal pour créer des DataFrames, exécuter des requêtes SQL et gérer la configuration du cluster (ou du mode local). Dans ce projet, il aurait permis d'allouer les ressources (mémoire, processeurs) allouées au traitement massif des fichiers audio.
+
+## 2. Spark DataFrames (Gestion distribuée des données)
+- **But** : Remplacer l'utilisation de `pandas.DataFrame`. Les DataFrames Spark permettent de stocker les chemins des milliers de fichiers WAV et leurs métadonnées associées de manière distribuée sur plusieurs nœuds ou cœurs de processeur. Cela évite de saturer la mémoire RAM de la machine (Out Of Memory) lors du traitement de gros volumes de données.
+
+## 3. UDF (User Defined Functions)
+- **But** : Paralléliser l'extraction des caractéristiques audio. Les bibliothèques comme `librosa` ou `wave` ne sont pas natives à Spark. Les fonctionnalités UDF (souvent `pandas_udf` pour plus de performances) permettent "d'envelopper" le code Python d'extraction de features (MFCC, Zero Crossing Rate, etc.) afin que Spark puisse distribuer cette extraction sur tous les cœurs ou les machines du cluster. 
+*(C'est précisément cette fonctionnalité qui a posé problème sous Windows et entraîné le basculement vers `joblib`).*
+
+## 4. Spark MLlib (Machine Learning distribué)
+- **But** : Entraîner les modèles (comme Random Forest ou Support Vector Machine) sur des données réparties. Au lieu d'utiliser `scikit-learn` qui charge toutes les données (`features.csv`) en mémoire locale, MLlib de PySpark permet d'effectuer des entraînements de modèles sur des Téraoctets de données sans limites de mémoire locale.
+
+## 5. RDD (Resilient Distributed Datasets) - Sous le capot
+- **But** : Bien que l'API DataFrame soit plus récente et optimisée, les données sous le capot sont gérées en tant que RDD. Ils assurent la tolérance aux pannes : si le calcul de features d'un fichier audio échoue sur un cœur de processeur, Spark le relance automatiquement ailleurs.
+
+---
+**En résumé** : 
+Spark devait apporter la **distribution dynamique** et la **parallélisation** du travail (lecture audio, extraction de données `librosa`, et modélisation MLLib) qui ont finalement été remplacées par `joblib` et `pandas` pour contourner des problèmes de compatibilité locale sous Windows.

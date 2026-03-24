@@ -1,40 +1,43 @@
 """
 feature_extraction.py
 ---------------------
-Lit le fichier output_csv.csv, extrait des features audio riches
-avec librosa (MFCC, ZCR, spectral centroid, etc.) en parallèle
+Lit le fichier output_csv.csv avec PySpark, extrait des features audio
+avec librosa (MFCC, ZCR, spectral centroid, etc.)
 et sauvegarde un nouveau fichier features.csv prêt pour l'entraînement.
 """
 
 import os
+import sys
 import numpy as np
 import pandas as pd
 import librosa
-from joblib import Parallel, delayed
-from tqdm import tqdm
+from pyspark.sql import SparkSession
+from pyspark.sql.types import (
+    StructType, StructField, StringType, DoubleType
+)
 
+# Configuration explicite de l'exécutable Python pour PySpark sous Windows
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 # ─────────────────────────────────────────────
 # Paramètres
 # ─────────────────────────────────────────────
-N_MFCC    = 13
-N_JOBS    = -1          # -1 = tous les cœurs CPU
-MAX_FILES = None        # None = tous ; mettre un int pour tester vite (ex: 200)
+N_MFCC     = 13
 INPUT_CSV  = "output_csv.csv"
 OUTPUT_CSV = "features.csv"
 
-
-def extract_features(row) -> dict | None:
+def extract_features_spark(row_dict) -> dict | None:
     """Extrait les features audio d'un fichier WAV. Retourne None si erreur."""
-    file_path = row["path"]
+    file_path = row_dict["path"]
     try:
         y, sr = librosa.load(file_path, sr=None, mono=True)
     except Exception:
         return None
 
-    feats = {"gender": row["gender"], "path": file_path}
+    feats = {"gender": row_dict["gender"], "path": file_path}
 
-    # MFCC
+    # MFCC jhng
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC)
     for i in range(N_MFCC):
         feats[f"mfcc{i+1}_mean"] = float(np.mean(mfcc[i]))
@@ -80,33 +83,76 @@ def extract_features(row) -> dict | None:
 
     return feats
 
-
 def main():
-    df_meta = pd.read_csv(INPUT_CSV)
-    # Exclure les fichiers "raw"
-    df_meta = df_meta[df_meta["gender"].isin(["male", "women"])].reset_index(drop=True)
+    print("Initialisation de PySpark pour l'extraction de features...")
+    spark = SparkSession.builder \
+        .appName("VoiceGender_FeatureExtraction") \
+        .master("local[*]") \
+        .getOrCreate()
+    
+    spark.sparkContext.setLogLevel("ERROR")
 
-    if MAX_FILES is not None:
-        df_meta = df_meta.head(MAX_FILES)
+    # 1. Lecture du CSV via PySpark
+    print(f"Lecture du fichier d'entrée : {INPUT_CSV}")
+    df_meta = spark.read.csv(INPUT_CSV, header=True, inferSchema=True)
 
-    nb = len(df_meta)
-    print(f"Extraction parallèle (N_JOBS={N_JOBS}) sur {nb} fichiers...")
-
-    rows_input = [row for _, row in df_meta.iterrows()]
-
-    results = Parallel(n_jobs=N_JOBS, prefer="threads")(
-        delayed(extract_features)(row)
-        for row in tqdm(rows_input, unit="fichier")
+    # 2. Filtrage des données "raw" via PySpark
+    df_filtered = df_meta.filter(df_meta.gender.isin("male", "women"))
+    
+    # 3. Extraction (Contournement Python Worker Timeout pour extraire localement + Spark)
+    # On rassemble les lignes pertinentes
+    rows_to_process = [row.asDict() for row in df_filtered.collect()]
+    nb = len(rows_to_process)
+    
+    print(f"Extraction sur {nb} fichiers (préparation des données avec Spark)...")
+    
+    # Afin de s'assurer de la stabilité sur Windows, on exécute l'extraction Python intensive ici
+    # (Sur un vrai cluster Linux, on utiliserait rdd.map() ou pandas_udf direct)
+    from joblib import Parallel, delayed
+    from tqdm import tqdm
+    
+    # Utilisation de Joblib pour la stabilité des threads sous Windows au lieu de Spark RDD map()
+    # qui crash avec SocketTimeoutException à cause des pipes de communication Java/Python Windows.
+    # Spark reste utilisé pour l'I/O et la création du DataFrame de sortie.
+    results = Parallel(n_jobs=-1, prefer="threads")(
+        delayed(extract_features_spark)(row)
+        for row in tqdm(rows_to_process, unit="fichier")
     )
+    
+    valid_results = [r for r in results if r is not None]
+    
+    if not valid_results:
+        print("Aucune feature n'a pu être extraite.")
+        spark.stop()
+        return
 
-    rows = [r for r in results if r is not None]
-    df_out = pd.DataFrame(rows)
-    df_out.to_csv(OUTPUT_CSV, index=False)
+    # 4. Reconstruction du Spark DataFrame final et sauvegarde
+    print("Création du DataFrame PySpark de sortie et sauvegarde CSV...")
+    
+    # Typage dynamique du schema en fonction du premier élément valide
+    first_row = valid_results[0]
+    fields = []
+    for k, v in first_row.items():
+        if isinstance(v, str):
+            fields.append(StructField(k, StringType(), True))
+        else:
+            fields.append(StructField(k, DoubleType(), True))
+            
+    schema_out = StructType(fields)
+    
+    # Création DataFrame PySpark
+    df_out = spark.createDataFrame(valid_results, schema=schema_out)
+    
+    # Sauvegarde
+    df_pandas = df_out.toPandas()
+    df_pandas.to_csv(OUTPUT_CSV, index=False)
 
-    print(f"\n✅ {len(df_out)} fichiers traités → {OUTPUT_CSV}")
-    print(f"   {df_out.shape[1] - 2} features extraites par fichier\n")
-    print(df_out.drop(columns=["path"]).head(5).to_string(index=False))
+    print(f"\n✅ {len(df_pandas)} fichiers traités → {OUTPUT_CSV}")
+    print(f"   {df_pandas.shape[1] - 2} features extraites par fichier\n")
+    print(df_pandas.drop(columns=["path"]).head(5).to_string(index=False))
 
+    spark.stop()
 
 if __name__ == "__main__":
     main()
+

@@ -200,6 +200,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 4. Affichage des résultats ---
 
     function displayResult(data) {
+        // Validation des données reçues
+        if (!data || !data.prediction || data.confidence === undefined || !data.details) {
+            console.error('Données invalides reçues:', data);
+            showError('Erreur: réponse invalide du serveur');
+            resetToReady();
+            return;
+        }
+
         updateStatus('Analyse terminée', 'ready');
 
         const isMale = data.prediction.toLowerCase() === 'male';
@@ -210,8 +218,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         confidenceValue.textContent = `${data.confidence}%`;
 
-        probMale.textContent = `${data.details.male.toFixed(2)}%`;
-        probFemale.textContent = `${data.details.women.toFixed(2)}%`;
+        const maleProb = data.details.male !== undefined ? data.details.male : 0;
+        const femaleProb = data.details.female !== undefined ? data.details.female : 0;
+
+        probMale.textContent = `${maleProb.toFixed(2)}%`;
+        probFemale.textContent = `${femaleProb.toFixed(2)}%`;
 
         // Gérer les couleurs via des classes CSS
         resultSection.classList.remove('is-male', 'is-female');

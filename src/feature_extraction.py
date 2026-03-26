@@ -79,6 +79,9 @@ def extract_features_from_path(file_path: str, gender: str) -> dict:
 
     return feats
 
+def extract_features_spark(row_dict):
+    return extract_features_from_path(row_dict["path"], row_dict["gender"])
+
 
 def main():
     print("initialisation pyspark")
@@ -100,7 +103,7 @@ def main():
     print(f"{file_count} fichiers trouves")
 
     if file_count == 0:
-        print("aucune donnée")
+        print("aucune donnee")
         spark.stop()
         return
 
@@ -172,7 +175,7 @@ def main():
     feature_cols = [c for c in df_features.columns if c not in ["path", "gender"]][:5]
     df_features.select(["gender"] + feature_cols).show(5, truncate=False)
 
-    print(f"fichiers sauvegardé : {OUTPUT_PARQUET}")
+    print(f"fichiers sauvegarde: {OUTPUT_PARQUET}")
 
     spark.stop()
 

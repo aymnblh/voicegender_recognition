@@ -91,7 +91,7 @@ def create_visualizations(df_pandas):
         plt.savefig(f"{VISUALIZATIONS_DIR}/matrice_correlation.png", dpi=150)
         plt.close()
 
-    print(f"✅ Visualisations sauvegardées dans : {VISUALIZATIONS_DIR}/")
+    print(f"Visualisations sauvegardées dans : {VISUALIZATIONS_DIR}/")
 
 
 def main():
@@ -106,7 +106,7 @@ def main():
     spark.sparkContext.setLogLevel("ERROR")
 
     if not os.path.exists(FEATURES_CSV):
-        print(f"❌ Fichier {FEATURES_CSV} introuvable. Exécutez d'abord src/feature_extraction.py")
+        print(f" Fichier {FEATURES_CSV} introuvable. Exécutez d'abord src/feature_extraction.py")
         spark.stop()
         return
 
@@ -121,7 +121,7 @@ def main():
     df_pandas = df_spark_filtered.toPandas()
 
     if df_pandas.empty:
-        print("❌ Aucune donnée à visualiser.")
+        print(" Aucune donnée à visualiser.")
         spark.stop()
         return
 

@@ -1,54 +1,50 @@
 """
 feature_extraction.py
----------------------
-Lit le fichier output_csv.csv avec PySpark, extrait des features audio
-avec librosa (MFCC, ZCR, spectral centroid, etc.)
-et sauvegarde un nouveau fichier features.csv prêt pour l'entraînement.
+extraction des features audio avec librosa
+sauvegarde en parquet pour l'entrainement
+optimise pour big data avec udf spark
 """
 
 import os
 import sys
 import numpy as np
-import pandas as pd
 import librosa
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType
 )
 
-# Configuration explicite de l'exécutable Python pour PySpark sous Windows
 os.environ["PYSPARK_PYTHON"] = sys.executable
 os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
-# ─────────────────────────────────────────────
-# Paramètres
-# ─────────────────────────────────────────────
 N_MFCC     = 13
-INPUT_CSV  = "output_csv.csv"
-OUTPUT_CSV = "features.csv"
+INPUT_PARQUET  = "/output/files.parquet"
+OUTPUT_PARQUET = "/output/features.parquet"
 
-def extract_features_spark(row_dict) -> dict | None:
-    """Extrait les features audio d'un fichier WAV. Retourne None si erreur."""
-    file_path = row_dict["path"]
+def extract_features_from_path(file_path: str, gender: str) -> dict:
+    """extraire les features audio d'un fichier wav"""
     try:
+        if not os.path.exists(file_path):
+            return None
+
         y, sr = librosa.load(file_path, sr=None, mono=True)
     except Exception:
         return None
 
-    feats = {"gender": row_dict["gender"], "path": file_path}
+    feats = {}
 
-    # MFCC jhng
+    # mfcc
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC)
     for i in range(N_MFCC):
         feats[f"mfcc{i+1}_mean"] = float(np.mean(mfcc[i]))
         feats[f"mfcc{i+1}_std"]  = float(np.std(mfcc[i]))
 
-    # Zero Crossing Rate
+    # zero crossing rate
     zcr = librosa.feature.zero_crossing_rate(y)
     feats["zcr_mean"] = float(np.mean(zcr))
     feats["zcr_std"]  = float(np.std(zcr))
 
-    # Spectral features
+    # spectral features
     sc = librosa.feature.spectral_centroid(y=y, sr=sr)
     feats["spectral_centroid_mean"] = float(np.mean(sc))
     feats["spectral_centroid_std"]  = float(np.std(sc))
@@ -61,17 +57,17 @@ def extract_features_spark(row_dict) -> dict | None:
     feats["spectral_rolloff_mean"] = float(np.mean(sro))
     feats["spectral_rolloff_std"]  = float(np.std(sro))
 
-    # RMS Energy
+    # rms energy
     rms = librosa.feature.rms(y=y)
     feats["rms_mean"] = float(np.mean(rms))
     feats["rms_std"]  = float(np.std(rms))
 
-    # Chroma
+    # chroma
     chroma = librosa.feature.chroma_stft(y=y, sr=sr)
     for i in range(12):
         feats[f"chroma{i+1}_mean"] = float(np.mean(chroma[i]))
 
-    # Fréquence fondamentale (F0) via YIN
+    # f0 frequency
     try:
         f0 = librosa.yin(y, fmin=50, fmax=500)
         f0_voiced = f0[f0 > 0]
@@ -83,73 +79,100 @@ def extract_features_spark(row_dict) -> dict | None:
 
     return feats
 
+
 def main():
-    print("Initialisation de PySpark pour l'extraction de features...")
+    print("initialisation pyspark")
     spark = SparkSession.builder \
         .appName("VoiceGender_FeatureExtraction") \
         .master("local[*]") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.driver.memory", "4g") \
+        .config("spark.driver.host", "127.0.0.1") \
+        .config("spark.driver.bindAddress", "127.0.0.1") \
         .getOrCreate()
-    
+
     spark.sparkContext.setLogLevel("ERROR")
 
-    # 1. Lecture du CSV via PySpark
-    print(f"Lecture du fichier d'entrée : {INPUT_CSV}")
-    df_meta = spark.read.csv(INPUT_CSV, header=True, inferSchema=True)
+    print(f"lecture: {INPUT_PARQUET}")
+    df_input = spark.read.parquet(INPUT_PARQUET)
 
-    # 2. Filtrage des données "raw" via PySpark
-    df_filtered = df_meta.filter(df_meta.gender.isin("male", "women"))
-    
-    # 3. Extraction (Contournement Python Worker Timeout pour extraire localement + Spark)
-    # On rassemble les lignes pertinentes
-    rows_to_process = [row.asDict() for row in df_filtered.collect()]
-    nb = len(rows_to_process)
-    
-    print(f"Extraction sur {nb} fichiers (préparation des données avec Spark)...")
-    
-    # Afin de s'assurer de la stabilité sur Windows, on exécute l'extraction Python intensive ici
-    # (Sur un vrai cluster Linux, on utiliserait rdd.map() ou pandas_udf direct)
-    from joblib import Parallel, delayed
-    from tqdm import tqdm
-    
-    # Utilisation de Joblib pour la stabilité des threads sous Windows au lieu de Spark RDD map()
-    # qui crash avec SocketTimeoutException à cause des pipes de communication Java/Python Windows.
-    # Spark reste utilisé pour l'I/O et la création du DataFrame de sortie.
-    results = Parallel(n_jobs=-1, prefer="threads")(
-        delayed(extract_features_spark)(row)
-        for row in tqdm(rows_to_process, unit="fichier")
-    )
-    
-    valid_results = [r for r in results if r is not None]
-    
-    if not valid_results:
-        print("Aucune feature n'a pu être extraite.")
+    file_count = df_input.count()
+    print(f"{file_count} fichiers trouves")
+
+    if file_count == 0:
+        print("aucune donnée")
         spark.stop()
         return
 
-    # 4. Reconstruction du Spark DataFrame final et sauvegarde
-    print("Création du DataFrame PySpark de sortie et sauvegarde CSV...")
-    
-    # Typage dynamique du schema en fonction du premier élément valide
-    first_row = valid_results[0]
-    fields = []
-    for k, v in first_row.items():
-        if isinstance(v, str):
-            fields.append(StructField(k, StringType(), True))
-        else:
-            fields.append(StructField(k, DoubleType(), True))
-            
-    schema_out = StructType(fields)
-    
-    # Création DataFrame PySpark
-    df_out = spark.createDataFrame(valid_results, schema=schema_out)
-    
-    # Sauvegarde
-    df_pandas = df_out.toPandas()
-    df_pandas.to_csv(OUTPUT_CSV, index=False)
+    # schema des features en sortie
+    features_schema = StructType([
+        StructField("mfcc1_mean", DoubleType()), StructField("mfcc1_std", DoubleType()),
+        StructField("mfcc2_mean", DoubleType()), StructField("mfcc2_std", DoubleType()),
+        StructField("mfcc3_mean", DoubleType()), StructField("mfcc3_std", DoubleType()),
+        StructField("mfcc4_mean", DoubleType()), StructField("mfcc4_std", DoubleType()),
+        StructField("mfcc5_mean", DoubleType()), StructField("mfcc5_std", DoubleType()),
+        StructField("mfcc6_mean", DoubleType()), StructField("mfcc6_std", DoubleType()),
+        StructField("mfcc7_mean", DoubleType()), StructField("mfcc7_std", DoubleType()),
+        StructField("mfcc8_mean", DoubleType()), StructField("mfcc8_std", DoubleType()),
+        StructField("mfcc9_mean", DoubleType()), StructField("mfcc9_std", DoubleType()),
+        StructField("mfcc10_mean", DoubleType()), StructField("mfcc10_std", DoubleType()),
+        StructField("mfcc11_mean", DoubleType()), StructField("mfcc11_std", DoubleType()),
+        StructField("mfcc12_mean", DoubleType()), StructField("mfcc12_std", DoubleType()),
+        StructField("mfcc13_mean", DoubleType()), StructField("mfcc13_std", DoubleType()),
+        StructField("zcr_mean", DoubleType()), StructField("zcr_std", DoubleType()),
+        StructField("spectral_centroid_mean", DoubleType()), StructField("spectral_centroid_std", DoubleType()),
+        StructField("spectral_bandwidth_mean", DoubleType()), StructField("spectral_bandwidth_std", DoubleType()),
+        StructField("spectral_rolloff_mean", DoubleType()), StructField("spectral_rolloff_std", DoubleType()),
+        StructField("rms_mean", DoubleType()), StructField("rms_std", DoubleType()),
+        StructField("chroma1_mean", DoubleType()), StructField("chroma2_mean", DoubleType()),
+        StructField("chroma3_mean", DoubleType()), StructField("chroma4_mean", DoubleType()),
+        StructField("chroma5_mean", DoubleType()), StructField("chroma6_mean", DoubleType()),
+        StructField("chroma7_mean", DoubleType()), StructField("chroma8_mean", DoubleType()),
+        StructField("chroma9_mean", DoubleType()), StructField("chroma10_mean", DoubleType()),
+        StructField("chroma11_mean", DoubleType()), StructField("chroma12_mean", DoubleType()),
+        StructField("f0_mean", DoubleType()), StructField("f0_std", DoubleType()),
+    ])
 
-    print(f"\n✅ {len(df_pandas)} fichiers traités → {OUTPUT_CSV}")
-    print(f"   {df_pandas.shape[1] - 2} features extraites par fichier\n")
-    print(df_pandas.drop(columns=["path"]).head(5).to_string(index=False))
+    # udf pour extraire les features
+    def extract_udf(path, gender):
+        """extraire les features"""
+        result = extract_features_from_path(path, gender)
+        if result is None:
+            return None
+        return tuple(result.get(field.name, 0.0) for field in features_schema.fields)
+
+    extract_features_udf = F.udf(extract_udf, features_schema)
+
+    print("extraction des features")
+    df_with_features = df_input.select(
+        F.col("gender"),
+        F.col("path"),
+        extract_features_udf(F.col("path"), F.col("gender")).alias("features")
+    ).filter(F.col("features").isNotNull())
+
+    # deballer la struct en colonnes
+    df_features = df_with_features.select(
+        F.col("gender"),
+        F.col("path"),
+        *[F.col("features")[field.name].alias(field.name)
+          for field in features_schema.fields]
+    )
+
+    result_count = df_features.count()
+    print(f"{result_count} fichiers traites")
+    print(f"{len(features_schema.fields)} features par fichier")
+
+    print("sauvegarde parquet")
+    df_features.write \
+        .mode("overwrite") \
+        .option("compression", "snappy") \
+        .parquet(OUTPUT_PARQUET)
+
+    print("apercu (5 colonnes):")
+    feature_cols = [c for c in df_features.columns if c not in ["path", "gender"]][:5]
+    df_features.select(["gender"] + feature_cols).show(5, truncate=False)
+
+    print(f"fichiers sauvegardé : {OUTPUT_PARQUET}")
 
     spark.stop()
 

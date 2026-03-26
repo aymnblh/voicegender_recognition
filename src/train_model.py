@@ -107,7 +107,7 @@ def train_and_evaluate(X, y, le):
             best_auc, best_name, best_pipe = auc, name, pipe
 
     print("=" * 60)
-    print(f"\n🏆 Meilleur modèle : {best_name}  (AUC={best_auc:.4f})\n")
+    print(f"\n Meilleur modèle : {best_name}  (AUC={best_auc:.4f})\n")
 
     os.makedirs("models", exist_ok=True)
     os.makedirs("models/visualizations", exist_ok=True)
@@ -164,7 +164,7 @@ def main():
     print(f"Chargement de {FEATURES_CSV}...")
     
     if not os.path.exists(FEATURES_CSV):
-        print(f"❌ Erreur : Le fichier {FEATURES_CSV} n'existe pas. Veuillez exécuter l'extraction d'abord.")
+        print(f" Erreur : Le fichier {FEATURES_CSV} n'existe pas. Veuillez exécuter l'extraction d'abord.")
         return
         
     X, y, le = load_data()
@@ -175,7 +175,7 @@ def main():
     # Sauvegarder le meilleur modèle + le label encoder
     os.makedirs("models", exist_ok=True)
     joblib.dump({"model": best_pipe, "label_encoder": le}, MODEL_OUTPUT)
-    print(f"✅ Modèle {best_name} sauvegardé dans {MODEL_OUTPUT}")
+    print(f" Modèle {best_name} sauvegardé dans {MODEL_OUTPUT}")
 
 
 if __name__ == "__main__":

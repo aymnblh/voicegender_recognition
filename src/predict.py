@@ -9,11 +9,11 @@ MODEL_PATH = "models/best_model.pkl"
 
 def predict(audio_path):
     if not os.path.exists(audio_path):
-        print(f"❌ Erreur : Le fichier {audio_path} n'existe pas.")
+        print(f" Erreur : Le fichier {audio_path} n'existe pas.")
         return
 
     if not os.path.exists(MODEL_PATH):
-        print(f"❌ Erreur : Le modèle n'a pas été trouvé dans {MODEL_PATH}.")
+        print(f" Erreur : Le modèle n'a pas été trouvé dans {MODEL_PATH}.")
         print("   Veuillez d'abord exécuter : python src/train_model.py")
         return
 
@@ -28,7 +28,7 @@ def predict(audio_path):
     raw_features = extract_features({"path": audio_path, "gender": "unknown"})
     
     if raw_features is None:
-        print("❌ Erreur : Impossible d'extraire les caractéristiques de l'audio.")
+        print(" Erreur : Impossible d'extraire les caractéristiques de l'audio.")
         return
 
     # Convertir en DataFrame (en enlevant les colonnes non-numériques utilisées par le modèle)
@@ -41,8 +41,8 @@ def predict(audio_path):
     label = le.inverse_transform([prediction_idx])[0]
     confidence = prob[prediction_idx] * 100
 
-    print(f"\n🎯 Résultat : {label.upper()}")
-    print(f"📈 Confiance : {confidence:.2f}%")
+    print(f"\n Résultat : {label.upper()}")
+    print(f" Confiance : {confidence:.2f}%")
     
     # Détails des probabilités
     for i, class_name in enumerate(le.classes_):

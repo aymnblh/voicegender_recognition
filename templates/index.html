@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Gender Recognition AI</title>
+    <!-- Google Fonts for Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+    <div class="circles-background">
+        <div class="circle circle-1"></div>
+        <div class="circle circle-2"></div>
+        <div class="circle circle-3"></div>
+    </div>
+
+    <main class="glass-container">
+        <header>
+            <div class="logo-box">
+                <i class="ph-fill ph-waveform"></i>
+            </div>
+            <h1>Voice Gender AI</h1>
+            <p class="subtitle">Analyse instantanée propulsée par Machine Learning</p>
+        </header>
+
+        <section class="recorder-section">
+            <div class="status-indicator">
+                <span id="status-text">Prêt à écouter</span>
+                <div id="status-dot" class="dot ready"></div>
+            </div>
+
+            <!-- Bouton d'enregistrement géant -->
+            <button id="record-btn" class="record-btn" aria-label="Enregistrer">
+                <div class="btn-content">
+                    <i class="ph-fill ph-microphone"></i>
+                </div>
+                <!-- Vagues animées pendant l'enregistrement (masquées par défaut) -->
+                <div id="waves" class="pulse-waves hidden">
+                    <span></span><span></span><span></span>
+                </div>
+            </button>
+            <p id="instruction" class="instruction-text">Appuyez pour parler</p>
+        </section>
+
+        <!-- Zone de résultat (Masquée par défaut) -->
+        <section id="result-section" class="result-section hidden">
+            <div class="result-card">
+                <div class="result-header">
+                    <h2 id="prediction-label">Homme</h2>
+                    <i id="gender-icon" class="ph-duotone ph-gender-male"></i>
+                </div>
+                
+                <div class="confidence-box">
+                    <div class="confidence-header">
+                        <span>Fiabilité</span>
+                        <span id="confidence-value">98.5%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+
+                <div class="details-box">
+                    <div class="detail-row">
+                        <span>Prob. Male:</span>
+                        <span id="prob-male">--</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Prob. Female:</span>
+                        <span id="prob-female">--</span>
+                    </div>
+                </div>
+
+                <button id="reset-btn" class="secondary-btn">
+                    <i class="ph-bold ph-arrow-counter-clockwise"></i> Nouvelle Analyse
+                </button>
+            </div>
+        </section>
+
+        <!-- Zone d'erreur -->
+        <div id="error-box" class="error-box hidden">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span id="error-message">Une erreur est survenue</span>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

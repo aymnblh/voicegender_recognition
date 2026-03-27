@@ -1,0 +1,32 @@
+
+services:
+  spark-voice-gender:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice_gender_spark
+    volumes:
+      # Monter les répertoires pour persistence des données
+      - ./data:/data:ro
+      - ./models:/models
+      - ./temp:/temp
+      - ./output:/output
+    environment:
+      # Configuration de Spark
+      PYSPARK_PYTHON: /usr/local/bin/python3
+      PYSPARK_DRIVER_PYTHON: /usr/local/bin/python3
+      SPARK_LOCAL_IP: 127.0.0.1
+      # Configuration pour éviter les avertissements Spark
+      SPARK_JAVA_OPTS: "-Djava.net.preferIPv4Stack=true"
+    # Augmenter les ressources si nécessaire
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    # Garder le conteneur actif pour déboguer
+    stdin_open: true
+    tty: true

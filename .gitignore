@@ -18,3 +18,7 @@ models/*.png
 # Tracebacks and Logs
 *.log
 runner.py
+
+models/*
+output/*
+temp/*

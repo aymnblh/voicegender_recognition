@@ -1,8 +1,7 @@
 """
 train_model.py
---------------
-Charge features.csv, entraîne plusieurs classifieurs,
-évalue leurs performances et sauvegarde le meilleur modèle.
+charge les features parquet, entraine les classifieurs
+evalue les performances et sauvegarde le meilleur modele
 """
 
 import os
@@ -18,47 +17,53 @@ from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     classification_report, confusion_matrix,
-    ConfusionMatrixDisplay, roc_auc_score
+    ConfusionMatrixDisplay, roc_auc_score, roc_curve
 )
 from sklearn.pipeline import Pipeline
 
-FEATURES_CSV  = "features.csv"
+FEATURES_PARQUET = "output/features.parquet"
 MODEL_OUTPUT  = "models/best_model.pkl"
 TEST_SIZE     = 0.2
-VAL_SIZE      = 0.1   
 RANDOM_STATE  = 42
 
 
 def load_data():
-    df = pd.read_csv(FEATURES_CSV)
-    df = df[df["gender"].isin(["male", "women"])].dropna()
+    print(f"chargement: {FEATURES_PARQUET}")
+
+    if not os.path.exists(FEATURES_PARQUET):
+        print(f"erreur: fichier non trouve")
+        return None, None, None
+
+    df = pd.read_parquet(FEATURES_PARQUET)
+
+    df = df[df["gender"].isin(["male", "female"])].dropna()
 
     X = df.drop(columns=["gender", "path"])
     y = df["gender"]
 
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
-    print(f"Classes : {dict(zip(le.classes_, le.transform(le.classes_)))}")
-    print(f"Distribution :\n{pd.Series(y).value_counts().to_string()}\n")
+    print(f"classes: {dict(zip(le.classes_, le.transform(le.classes_)))}")
+    print(f"distribution:\n{pd.Series(y).value_counts().to_string()}\n")
     return X, y_enc, le
 
 
 def build_pipelines():
-    """Retourne un dict de Pipelines (StandardScaler + classifieur)."""
+    """modeles avec scaler + classifieur"""
     return {
-        "Logistic Regression": Pipeline([
+        "logistic regression": Pipeline([
             ("scaler", StandardScaler()),
             ("clf", LogisticRegression(max_iter=1000, random_state=RANDOM_STATE))
         ]),
-        "SVM (RBF)": Pipeline([
+        "svm rbf": Pipeline([
             ("scaler", StandardScaler()),
             ("clf", SVC(kernel="rbf", probability=True, random_state=RANDOM_STATE))
         ]),
-        "Random Forest": Pipeline([
+        "random forest": Pipeline([
             ("scaler", StandardScaler()),
             ("clf", RandomForestClassifier(n_estimators=200, n_jobs=-1, random_state=RANDOM_STATE))
         ]),
-        "Gradient Boosting": Pipeline([
+        "gradient boosting": Pipeline([
             ("scaler", StandardScaler()),
             ("clf", GradientBoostingClassifier(n_estimators=200, random_state=RANDOM_STATE))
         ]),
@@ -73,23 +78,27 @@ def train_and_evaluate(X, y, le):
     pipelines = build_pipelines()
     results = {}
 
-    print("=" * 60)
-    print(f"{'Modèle':<25} | {'CV Acc':>8} | {'Test Acc':>9} | {'AUC':>7}")
-    print("=" * 60)
+    print("-" * 60)
+    print(f"{'modele':<25} | {'cv acc':>8} | {'test acc':>9} | {'auc':>7}")
+    print("-" * 60)
 
     best_name, best_pipe, best_auc = None, None, -1.0
+    
+    plt.figure(figsize=(10, 8))
 
     for name, pipe in pipelines.items():
-        # Cross-validation sur train+val
         cv_scores = cross_val_score(pipe, X_trainval, y_trainval, cv=5,
                                     scoring="accuracy", n_jobs=-1)
-        # Entraînement final sur tout trainval
         pipe.fit(X_trainval, y_trainval)
-        # Évaluation sur test
+        
         y_pred  = pipe.predict(X_test)
         y_proba = pipe.predict_proba(X_test)[:, 1]
+        
         acc  = np.mean(y_pred == y_test)
         auc  = roc_auc_score(y_test, y_proba)
+        
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        plt.plot(fpr, tpr, lw=2, label=f"{name} (auc = {auc:.3f})")
 
         print(f"{name:<25} | {cv_scores.mean():.4f}   | {acc:.4f}    | {auc:.4f}")
         results[name] = {"pipeline": pipe, "acc": acc, "auc": auc,
@@ -98,50 +107,75 @@ def train_and_evaluate(X, y, le):
         if auc > best_auc:
             best_auc, best_name, best_pipe = auc, name, pipe
 
-    print("=" * 60)
-    print(f"\n🏆 Meilleur modèle : {best_name}  (AUC={best_auc:.4f})\n")
+    print("-" * 60)
+    print(f"meilleur modele: {best_name} (auc={best_auc:.4f})\n")
 
-    # Rapport détaillé du meilleur modèle
-    print(f"── Rapport de classification ({best_name}) ──")
+    os.makedirs("models", exist_ok=True)
+    os.makedirs("models/visualizations", exist_ok=True)
+
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label="chance")
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('faux positifs')
+    plt.ylabel('vrais positifs')
+    plt.title('courbes roc')
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig("models/visualizations/roc_curves.png", dpi=150)
+    plt.close()
+    print("roc curves: models/visualizations/roc_curves.png")
+
+    print(f"rapport: {best_name}")
     print(classification_report(y_test, results[best_name]["y_pred"],
                                  target_names=le.classes_))
 
-    # Matrice de confusion
-    os.makedirs("models", exist_ok=True)
     cm = confusion_matrix(y_test, results[best_name]["y_pred"])
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=le.classes_)
     disp.plot(cmap="Blues")
-    plt.title(f"Matrice de confusion – {best_name}")
+    plt.title(f"confusion matrix - {best_name}")
     plt.tight_layout()
-    plt.savefig("models/confusion_matrix.png", dpi=150)
-    print("   → Matrice de confusion sauvegardée dans models/confusion_matrix.png")
+    plt.savefig("models/visualizations/confusion_matrix.png", dpi=150)
+    print("confusion matrix: models/visualizations/confusion_matrix.png")
 
-    # Feature importance (Random Forest seulement)
-    if "Random Forest" in results:
-        rf_pipe = results["Random Forest"]["pipeline"]
+    if "random forest" in results:
+        rf_pipe = results["random forest"]["pipeline"]
         rf_clf  = rf_pipe.named_steps["clf"]
         importances = pd.Series(rf_clf.feature_importances_, index=X.columns)
         top20 = importances.nlargest(20)
-        top20.sort_values().plot(kind="barh", figsize=(8, 6))
-        plt.title("Top 20 features (Random Forest)")
+        
+        plt.figure(figsize=(10, 8))
+        top20.sort_values().plot(kind="barh", color="#2E86C1")
+        plt.title("top 20 features (random forest)", fontsize=14)
+        plt.xlabel("importance")
+        plt.ylabel("features")
         plt.tight_layout()
-        plt.savefig("models/feature_importance.png", dpi=150)
-        print("   → Importance des features sauvegardée dans models/feature_importance.png\n")
+        plt.savefig("models/visualizations/feature_importance.png", dpi=150)
+        plt.close()
+        print("feature importance: models/visualizations/feature_importance.png\n")
 
-    return best_name, best_pipe
+    return best_name, best_pipe, X
 
 
 def main():
-    print(f"Chargement de {FEATURES_CSV}...")
+    print(f"chargement...")
+
+    if not os.path.exists(FEATURES_PARQUET):
+        print(f"erreur: {FEATURES_PARQUET} non trouve")
+        return
+        
     X, y, le = load_data()
-    print(f"Dataset : {X.shape[0]} exemples × {X.shape[1]} features\n")
+    print(f"dataset: {X.shape[0]} exemples x {X.shape[1]} features\n")
 
-    best_name, best_pipe = train_and_evaluate(X, y, le)
+    best_name, best_pipe, X_train = train_and_evaluate(X, y, le)
 
-    # Sauvegarder le meilleur modèle + le label encoder
     os.makedirs("models", exist_ok=True)
-    joblib.dump({"model": best_pipe, "label_encoder": le}, MODEL_OUTPUT)
-    print(f"✅ Modèle sauvegardé dans {MODEL_OUTPUT}")
+    joblib.dump({
+        "model": best_pipe,
+        "label_encoder": le,
+        "feature_columns": list(X_train.columns)
+    }, MODEL_OUTPUT)
+    print(f"modele sauvegarde: {MODEL_OUTPUT}")
+    print(f"colonnes: {len(X_train.columns)} features")
 
 
 if __name__ == "__main__":

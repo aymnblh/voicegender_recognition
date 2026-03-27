@@ -35,8 +35,4 @@ ENV SPARK_LOCAL_IP=127.0.0.1
 # Créer les répertoires nécessaires
 RUN mkdir -p /app/temp /app/models /app/logs /data /output
 
-# Port par défaut pour Flask
-EXPOSE 5000
-
-ENTRYPOINT ["python", "src/extract_wav_files.py"]
-#ENTRYPOINT ["python", "src/feature_extraction.py"]
+ENTRYPOINT ["sh", "-c", "python src/extract_wav_files.py --test && python src/feature_extraction.py"]

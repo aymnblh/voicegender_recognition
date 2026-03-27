@@ -24,10 +24,17 @@ OUTPUT_PARQUET = "/output/features.parquet"
 def extract_features_from_path(file_path: str, gender: str) -> dict:
     """extraire les features audio d'un fichier wav"""
     try:
-        if not os.path.exists(file_path):
+        # nettoyer les prefixes spark
+        clean_path = file_path
+        if clean_path.startswith("file://"):
+            clean_path = clean_path[7:]
+        if clean_path.startswith("file:"):
+            clean_path = clean_path[5:]
+
+        if not os.path.exists(clean_path):
             return None
 
-        y, sr = librosa.load(file_path, sr=None, mono=True)
+        y, sr = librosa.load(clean_path, sr=None, mono=True)
     except Exception:
         return None
 
@@ -92,6 +99,8 @@ def main():
         .config("spark.driver.memory", "4g") \
         .config("spark.driver.host", "127.0.0.1") \
         .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.python.worker.memory", "1g") \
+        .config("spark.python.worker.reuse", "true") \
         .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
@@ -101,6 +110,9 @@ def main():
 
     file_count = df_input.count()
     print(f"{file_count} fichiers trouves")
+
+    print("\npremiers chemins:")
+    df_input.select("path", "gender").show(3, truncate=False)
 
     if file_count == 0:
         print("aucune donnee")
@@ -136,24 +148,32 @@ def main():
         StructField("f0_mean", DoubleType()), StructField("f0_std", DoubleType()),
     ])
 
-    # udf pour extraire les features
+    print("extraction des features")
+
+    # extraire les features
     def extract_udf(path, gender):
-        """extraire les features"""
-        result = extract_features_from_path(path, gender)
-        if result is None:
+        try:
+            if path is None or gender is None:
+                return None
+
+            result = extract_features_from_path(path, gender)
+            if result is None:
+                return None
+
+            return tuple(result.get(field.name, 0.0) for field in features_schema.fields)
+
+        except Exception:
             return None
-        return tuple(result.get(field.name, 0.0) for field in features_schema.fields)
 
     extract_features_udf = F.udf(extract_udf, features_schema)
 
-    print("extraction des features")
     df_with_features = df_input.select(
         F.col("gender"),
         F.col("path"),
         extract_features_udf(F.col("path"), F.col("gender")).alias("features")
     ).filter(F.col("features").isNotNull())
 
-    # deballer la struct en colonnes
+    # déballer la struct en colonnes
     df_features = df_with_features.select(
         F.col("gender"),
         F.col("path"),
@@ -162,7 +182,7 @@ def main():
     )
 
     result_count = df_features.count()
-    print(f"{result_count} fichiers traites")
+    print(f"\n{result_count} fichiers traites")
     print(f"{len(features_schema.fields)} features par fichier")
 
     print("sauvegarde parquet")

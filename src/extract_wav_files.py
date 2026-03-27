@@ -7,13 +7,12 @@ from pyspark.sql.types import (
     StructType, StructField, DoubleType, IntegerType, StringType
 )
 
-# Configuration explicite de l'exécutable Python pour PySpark (compatible Docker et Windows)
 os.environ["PYSPARK_PYTHON"] = sys.executable
 os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
 
 
-def extract_wav_files(test_mode=True, test_limit=1000):
+def extract_wav_files(test_mode, test_limit):
     data_path = "/data/*/*.wav"
     output_file = "/output/files.parquet"
 
@@ -140,6 +139,25 @@ def extract_wav_files(test_mode=True, test_limit=1000):
     spark.stop()
 
 if __name__ == "__main__":
-    extract_wav_files()
+    import sys
+
+    test_mode = "-test" in sys.argv or "--test" in sys.argv
+    test_limit = 100
+
+    for arg in sys.argv:
+        if arg.startswith("--limit="):
+            try:
+                test_limit = int(arg.split("=")[1])
+            except:
+                pass
+        elif arg.startswith("-limit"):
+            try:
+                idx = sys.argv.index(arg)
+                if idx + 1 < len(sys.argv):
+                    test_limit = int(sys.argv[idx + 1])
+            except:
+                pass
+
+    extract_wav_files(test_mode=test_mode, test_limit=test_limit)
 
 
